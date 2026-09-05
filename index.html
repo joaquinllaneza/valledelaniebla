@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>La niebla del valle</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #2c2116; }
+  #app { position: relative; width: 100%; height: 100%; font-family: Georgia, 'Iowan Old Style', serif; }
+  #mount { position: absolute; inset: 0; }
+  #mount canvas { display: block; touch-action: none; cursor: grab; }
+
+  #startScreen {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; padding: 24px;
+    background: radial-gradient(circle at 50% 30%, #4a3a22 0%, #241a10 70%, #140e08 100%);
+  }
+  #startScreen h1 { color: #ece3cc; font-size: clamp(28px, 5vw, 48px); margin: 0; font-weight: 400; }
+  #startScreen p {
+    color: #c9932a; max-width: 420px; margin-top: 14px; font-size: 16px; line-height: 1.6;
+    font-family: -apple-system, sans-serif;
+  }
+  #startButton {
+    margin-top: 28px; padding: 12px 30px; font-size: 16px; font-family: -apple-system, sans-serif;
+    color: #2c2116; background: #c9932a; border: none; border-radius: 3px; cursor: pointer;
+  }
+  #startButton:focus { outline: 2px solid #ece3cc; }
+
+  #crosshair {
+    position: absolute; top: 50%; left: 50%; width: 6px; height: 6px;
+    margin: -3px 0 0 -3px; border-radius: 50%; background: rgba(236,227,204,0.85);
+    pointer-events: none; display: none;
+  }
+  #vignette {
+    position: absolute; inset: 0; pointer-events: none; display: none;
+    transition: background 0.15s linear;
+  }
+  #banner {
+    position: absolute; top: 12%; left: 50%; transform: translateX(-50%);
+    padding: 10px 22px; border-radius: 4px; font-weight: 700; letter-spacing: 0.3px;
+    color: #ece3cc; text-align: center; pointer-events: none; display: none;
+  }
+  #hint {
+    position: absolute; bottom: 26px; left: 26px; color: #ece3cc;
+    background: rgba(30,24,16,0.55); padding: 12px 16px; border-radius: 4px;
+    font-size: 14px; line-height: 1.6; max-width: 240px; pointer-events: none;
+    font-family: -apple-system, sans-serif;
+  }
+  #walkButton {
+    position: absolute; bottom: 26px; right: 26px; width: 84px; height: 84px;
+    border-radius: 50%; border: 2px solid #c9932a; background: rgba(30,24,16,0.55);
+    color: #ece3cc; font-size: 13px; font-family: -apple-system, sans-serif; touch-action: none;
+    display: none;
+  }
+</style>
+</head>
+<body>
+  <div id="app">
+    <div id="mount"></div>
+    <div id="crosshair"></div>
+    <div id="vignette"></div>
+    <div id="banner"></div>
+    <div id="hint">
+      Camina con WASD o las flechas.<br />
+      Arrastra el ratón para mirar alrededor.
+    </div>
+    <button id="walkButton">Caminar</button>
+
+    <div id="startScreen">
+      <h1>La niebla del valle</h1>
+      <p>
+        Caminas solo por un valle prehistórico cubierto de niebla. No estás solo: algo mucho
+        más grande respira ahí fuera.
+      </p>
+      <button id="startButton">Entrar al valle</button>
+    </div>
+  </div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js';
+
+const mount = document.getElementById('mount');
+const startScreen = document.getElementById('startScreen');
+const startButton = document.getElementById('startButton');
+const hint = document.getElementById('hint');
+const banner = document.getElementById('banner');
+const vignette = document.getElementById('vignette');
+const walkButton = document.getElementById('walkButton');
+const crosshair = document.getElementById('crosshair');
+
+let walking = false;
+let hintCleared = false;
+
+function setBanner(text, tone) {
+  if (!text) { banner.style.display = 'none'; return; }
+  banner.textContent = text;
+  banner.style.fontSize = tone === 'peligro' ? '26px' : '18px';
+  banner.style.background = tone === 'peligro' ? 'rgba(90,20,14,0.75)' : 'rgba(40,32,20,0.65)';
+  banner.style.border = `1px solid ${tone === 'peligro' ? '#a83e2c' : '#c9932a'}`;
+  banner.style.display = 'block';
+}
+
+function setDanger(value) {
+  if (value <= 0) { vignette.style.display = 'none'; return; }
+  vignette.style.display = 'block';
+  vignette.style.background = `radial-gradient(ellipse at center, transparent 45%, rgba(168,62,44,${0.55 * value}) 100%)`;
+}
+
+startButton.addEventListener('click', () => {
+  startScreen.style.display = 'none';
+  hint.style.display = 'block';
+  walkButton.style.display = 'block';
+  crosshair.style.display = 'block';
+  startGame();
+}, { once: true });
+
+walkButton.addEventListener('pointerdown', () => { walking = true; });
+walkButton.addEventListener('pointerup', () => { walking = false; });
+walkButton.addEventListener('pointerleave', () => { walking = false; });
+
+function startGame() {
+  const scene = new THREE.Scene();
+  const duskFog = 0xcfa96b;
+  scene.background = new THREE.Color(duskFog);
+  scene.fog = new THREE.Fog(duskFog, 12, 62);
+
+  const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 300);
+  camera.rotation.order = 'YXZ';
+  const eyeHeight = 1.65;
+  camera.position.set(0, eyeHeight, 78);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  mount.appendChild(renderer.domElement);
+
+  function resize() {
+    const w = mount.clientWidth;
+    const h = mount.clientHeight;
+    camera.aspect = w / Math.max(h, 1);
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const hemi = new THREE.HemisphereLight(0xf4dfa8, 0x36301f, 0.9);
+  scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xffdca8, 0.8);
+  sun.position.set(-30, 40, 10);
+  scene.add(sun);
+
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(320, 320, 1, 1),
+    new THREE.MeshLambertMaterial({ color: 0x5c6a3d })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  scene.add(ground);
+
+  const world = new THREE.Group();
+  scene.add(world);
+
+  const trunkGeo = new THREE.CylinderGeometry(0.15, 0.22, 2.2, 6);
+  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5a4128 });
+  const frondGeo = new THREE.ConeGeometry(1.1, 1.8, 6);
+  const frondMat = new THREE.MeshLambertMaterial({ color: 0x3f6b34 });
+  const rockGeo = new THREE.IcosahedronGeometry(0.7, 0);
+  const rockMat = new THREE.MeshLambertMaterial({ color: 0x6b6355 });
+
+  function scatter(count, build, minR, maxR) {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = minR + Math.random() * (maxR - minR);
+      build(Math.sin(angle) * radius, Math.cos(angle) * radius);
+    }
+  }
+
+  scatter(46, (x, z) => {
+    const tree = new THREE.Group();
+    const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+    trunk.position.y = 1.1;
+    const frond = new THREE.Mesh(frondGeo, frondMat);
+    frond.position.y = 2.5;
+    tree.add(trunk, frond);
+    tree.scale.setScalar(0.7 + Math.random() * 0.9);
+    tree.position.set(x, 0, z);
+    tree.rotation.y = Math.random() * Math.PI;
+    world.add(tree);
+  }, 8, 140);
+
+  scatter(28, (x, z) => {
+    const rock = new THREE.Mesh(rockGeo, rockMat);
+    const scale = 0.5 + Math.random() * 1.1;
+    rock.scale.setScalar(scale);
+    rock.position.set(x, scale * 0.35, z);
+    rock.rotation.set(Math.random(), Math.random(), Math.random());
+    world.add(rock);
+  }, 4, 130);
+
+  const rexMat = new THREE.MeshLambertMaterial({ color: 0x4b5d3a });
+  const rexBellyMat = new THREE.MeshLambertMaterial({ color: 0x8a9468 });
+  const rex = new THREE.Group();
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.1, 2.4, 4.6), rexMat);
+  body.position.set(0, 2.6, 0);
+  body.rotation.x = 0.12;
+  rex.add(body);
+
+  const belly = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.6, 3.6), rexBellyMat);
+  belly.position.set(0, 2.1, 0.2);
+  rex.add(belly);
+
+  const head = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.5, 2.4), rexMat);
+  head.position.set(0, 3.7, 2.9);
+  rex.add(head);
+
+  const jaw = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.5, 2.1), rexBellyMat);
+  jaw.position.set(0, 3.15, 2.9);
+  rex.add(jaw);
+
+  const eyeGeo = new THREE.SphereGeometry(0.14, 8, 8);
+  const eyeMat = new THREE.MeshLambertMaterial({ color: 0xffd23f });
+  [-0.65, 0.65].forEach((sideX) => {
+    const eye = new THREE.Mesh(eyeGeo, eyeMat);
+    eye.position.set(sideX, 4.1, 3.9);
+    rex.add(eye);
+  });
+
+  const tail = new THREE.Group();
+  for (let i = 0; i < 4; i++) {
+    const seg = new THREE.Mesh(
+      new THREE.BoxGeometry(1.2 - i * 0.22, 1.2 - i * 0.22, 1.4),
+      rexMat
+    );
+    seg.position.set(0, 2.5 - i * 0.15, -2.6 - i * 1.3);
+    tail.add(seg);
+  }
+  rex.add(tail);
+
+  const legGeo = new THREE.CylinderGeometry(0.35, 0.45, 2.6, 6);
+  [-0.75, 0.75].forEach((sideX) => {
+    const leg = new THREE.Mesh(legGeo, rexMat);
+    leg.position.set(sideX, 1.3, -0.2);
+    rex.add(leg);
+    const foot = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.35, 1.1), rexMat);
+    foot.position.set(sideX, 0.15, 0.25);
+    rex.add(foot);
+  });
+
+  const armGeo = new THREE.CylinderGeometry(0.12, 0.16, 0.8, 6);
+  [-0.9, 0.9].forEach((sideX) => {
+    const arm = new THREE.Mesh(armGeo, rexMat);
+    arm.position.set(sideX, 2.9, 1.9);
+    arm.rotation.x = -0.6;
+    rex.add(arm);
+  });
+
+  rex.position.set(4, 0, -82);
+  rex.rotation.y = Math.PI;
+  scene.add(rex);
+
+  const keys = {};
+  const look = { yaw: Math.PI, pitch: 0 };
+  camera.rotation.y = look.yaw;
+  let dragging = false, lastX = 0, lastY = 0, bobPhase = 0;
+  let encounterState = 'lejos';
+  let encounterTimer = 0;
+  let dangerValue = 0;
+
+  window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
+  window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
+
+  renderer.domElement.addEventListener('pointerdown', (e) => {
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    renderer.domElement.style.cursor = 'grabbing';
+    renderer.domElement.setPointerCapture(e.pointerId);
+  });
+  renderer.domElement.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - lastX, dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    look.yaw -= dx * 0.0045;
+    look.pitch = Math.max(-0.6, Math.min(0.6, look.pitch - dy * 0.0045));
+  });
+  renderer.domElement.addEventListener('pointerup', () => {
+    dragging = false;
+    renderer.domElement.style.cursor = 'grab';
+  });
+
+  const clock = new THREE.Clock();
+
+  function animate() {
+    requestAnimationFrame(animate);
+    const delta = Math.min(clock.getDelta(), 0.05);
+
+    camera.rotation.y = look.yaw;
+    camera.rotation.x = look.pitch;
+
+    const forwardPressed = keys['w'] || keys['arrowup'];
+    const backPressed = keys['s'] || keys['arrowdown'];
+    const leftPressed = keys['a'] || keys['arrowleft'];
+    const rightPressed = keys['d'] || keys['arrowright'];
+    const moving = forwardPressed || backPressed || leftPressed || rightPressed || walking;
+
+    if (moving && !hintCleared) {
+      hintCleared = true;
+      hint.style.display = 'none';
+    }
+
+    const speed = 9.5 * delta;
+    const sinY = Math.sin(look.yaw), cosY = Math.cos(look.yaw);
+    let moveX = 0, moveZ = 0;
+    if (forwardPressed || walking) { moveX -= sinY; moveZ -= cosY; }
+    if (backPressed) { moveX += sinY; moveZ += cosY; }
+    if (leftPressed) { moveX -= cosY; moveZ += sinY; }
+    if (rightPressed) { moveX += cosY; moveZ -= sinY; }
+    const len = Math.hypot(moveX, moveZ);
+    if (len > 0) {
+      camera.position.x += (moveX / len) * speed;
+      camera.position.z += (moveZ / len) * speed;
+    }
+    camera.position.x = Math.max(-150, Math.min(150, camera.position.x));
+    camera.position.z = Math.max(-150, Math.min(150, camera.position.z));
+
+    bobPhase += moving ? delta * 9 : 0;
+    camera.position.y = eyeHeight + (moving ? Math.sin(bobPhase) * 0.045 : 0);
+
+    const dx = camera.position.x - rex.position.x;
+    const dz = camera.position.z - rex.position.z;
+    const dist = Math.hypot(dx, dz);
+
+    if (dist < 45 && encounterState === 'lejos') {
+      encounterState = 'acecha';
+      setBanner('Algo enorme se mueve entre la niebla…', 'aviso');
+    }
+    if (dist < 16 && encounterState !== 'cerca') {
+      encounterState = 'cerca';
+      encounterTimer = 0;
+      setBanner('¡ES UN T-REX! ¡ALÉJATE!', 'peligro');
+    }
+
+    if (encounterState === 'acecha' && dist > 3) {
+      const chaseSpeed = 3.4 * delta;
+      rex.position.x += (dx / dist) * chaseSpeed;
+      rex.position.z += (dz / dist) * chaseSpeed;
+      rex.rotation.y = Math.atan2(dx, dz);
+    }
+
+    if (encounterState === 'cerca') {
+      encounterTimer += delta;
+      dangerValue = Math.min(1, encounterTimer / 1.2);
+      setDanger(dangerValue);
+      const shake = 0.035;
+      camera.position.x += (Math.random() - 0.5) * shake;
+      camera.position.y += (Math.random() - 0.5) * shake;
+      if (dist > 3.5) {
+        const chaseSpeed = 2.2 * delta;
+        rex.position.x += (dx / dist) * chaseSpeed;
+        rex.position.z += (dz / dist) * chaseSpeed;
+        rex.rotation.y = Math.atan2(dx, dz);
+      }
+      if (encounterTimer > 5) {
+        encounterState = 'retirada';
+        setBanner('El T-Rex se pierde de nuevo en la niebla…', 'aviso');
+      }
+    }
+
+    if (encounterState === 'retirada') {
+      dangerValue = Math.max(0, dangerValue - delta * 0.6);
+      setDanger(dangerValue);
+      const homeX = 4, homeZ = -82;
+      const hx = homeX - rex.position.x, hz = homeZ - rex.position.z;
+      const hd = Math.hypot(hx, hz);
+      if (hd > 1) {
+        const retreatSpeed = 3 * delta;
+        rex.position.x += (hx / hd) * retreatSpeed;
+        rex.position.z += (hz / hd) * retreatSpeed;
+        rex.rotation.y = Math.atan2(hx, hz);
+      } else {
+        encounterState = 'lejos';
+        setBanner(null);
+        setDanger(0);
+      }
+    }
+
+    renderer.render(scene, camera);
+  }
+  animate();
+}
+</script>
+</body>
+</html>
