@@ -25,6 +25,10 @@
     color: #2c2116; background: #c9932a; border: none; border-radius: 3px; cursor: pointer;
   }
   #startButton:focus { outline: 2px solid #ece3cc; }
+  #versionLabel {
+    margin-top: 18px; color: #ece3cc; opacity: 0.5; font-size: 12px;
+    font-family: -apple-system, sans-serif;
+  }
 
   #crosshair {
     position: absolute; top: 50%; left: 50%; width: 6px; height: 6px;
@@ -121,11 +125,15 @@
         más grande respira ahí fuera.
       </p>
       <button id="startButton">Entrar al valle</button>
+      <p id="versionLabel"></p>
     </div>
   </div>
 
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js';
+
+const GAME_VERSION = '1.4';
+document.getElementById('versionLabel').textContent = `Versión ${GAME_VERSION}`;
 
 const mount = document.getElementById('mount');
 const startScreen = document.getElementById('startScreen');
@@ -171,6 +179,113 @@ function setDanger(value) {
   vignette.style.background = `radial-gradient(ellipse at center, transparent 45%, rgba(168,62,44,${0.55 * value}) 100%)`;
 }
 
+let audio = null;
+function initAudio() {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  ctx.resume();
+  const master = ctx.createGain();
+  master.gain.value = 0.6;
+  master.connect(ctx.destination);
+
+  const ambientGain = ctx.createGain();
+  ambientGain.gain.value = 0.03;
+  const ambientFilter = ctx.createBiquadFilter();
+  ambientFilter.type = 'lowpass';
+  ambientFilter.frequency.value = 300;
+  ambientGain.connect(ambientFilter);
+  ambientFilter.connect(master);
+
+  [55, 65.41, 82.41].forEach((freq) => {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    const oscGain = ctx.createGain();
+    oscGain.gain.value = 0.33;
+    osc.connect(oscGain);
+    oscGain.connect(ambientGain);
+    osc.start();
+  });
+
+  let tension = 0;
+  function setTension(target) {
+    tension += (target - tension) * 0.04;
+    ambientGain.gain.setTargetAtTime(0.025 + tension * 0.06, ctx.currentTime, 0.3);
+    ambientFilter.frequency.setTargetAtTime(280 + tension * 900, ctx.currentTime, 0.3);
+  }
+
+  function playStep() {
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = 90 + Math.random() * 20;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.16, t);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+    osc.connect(g);
+    g.connect(master);
+    osc.start(t);
+    osc.stop(t + 0.1);
+  }
+
+  function playEggChime() {
+    const t = ctx.currentTime;
+    [660, 990].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const g = ctx.createGain();
+      const start = t + i * 0.09;
+      g.gain.setValueAtTime(0.0001, start);
+      g.gain.exponentialRampToValueAtTime(0.22, start + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, start + 0.22);
+      osc.connect(g);
+      g.connect(master);
+      osc.start(start);
+      osc.stop(start + 0.25);
+    });
+  }
+
+  function playRoar(intensity) {
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    const startFreq = 90 + intensity * 40;
+    osc.frequency.setValueAtTime(startFreq, t);
+    osc.frequency.exponentialRampToValueAtTime(startFreq * 0.5, t + 0.9);
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 500 + intensity * 400;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.28 * intensity + 0.12, t + 0.12);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.1);
+    osc.connect(filter);
+    filter.connect(g);
+    g.connect(master);
+    osc.start(t);
+    osc.stop(t + 1.15);
+  }
+
+  function playScreech() {
+    const t = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(1800, t);
+    osc.frequency.exponentialRampToValueAtTime(2600, t + 0.12);
+    osc.frequency.exponentialRampToValueAtTime(1200, t + 0.3);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.15, t + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+    osc.connect(g);
+    g.connect(master);
+    osc.start(t);
+    osc.stop(t + 0.35);
+  }
+
+  return { ctx, setTension, playStep, playEggChime, playRoar, playScreech };
+}
+
 startButton.addEventListener('click', () => {
   startScreen.style.display = 'none';
   hint.style.display = 'block';
@@ -178,6 +293,7 @@ startButton.addEventListener('click', () => {
   crosshair.style.display = 'block';
   eggRow.style.display = 'flex';
   strikeRow.style.display = 'flex';
+  audio = initAudio();
   startGame();
 }, { once: true });
 
@@ -454,12 +570,13 @@ function startGame() {
     raptor.group.position.set(spawnX, 0, spawnZ);
     raptor.group.visible = true;
     raptor.state = 'activo';
+    audio.playScreech();
   }
 
   const keys = {};
   const look = { yaw: Math.PI, pitch: 0 };
   camera.rotation.y = look.yaw;
-  let dragging = false, lastX = 0, lastY = 0, bobPhase = 0;
+  let dragging = false, lastX = 0, lastY = 0, bobPhase = 0, stepTimer = 0;
   let encounterState = 'lejos';
   let encounterTimer = 0;
   let dangerValue = 0;
@@ -528,6 +645,16 @@ function startGame() {
       hint.style.display = 'none';
     }
 
+    if (moving) {
+      stepTimer -= delta;
+      if (stepTimer <= 0) {
+        audio.playStep();
+        stepTimer = 0.32;
+      }
+    } else {
+      stepTimer = 0;
+    }
+
     const speed = 9.5 * delta;
     const sinY = Math.sin(look.yaw), cosY = Math.cos(look.yaw);
     let moveX = 0, moveZ = 0;
@@ -556,6 +683,7 @@ function startGame() {
         eggsFound += 1;
         eggRow.children[eggsFound - 1].classList.add('filled');
         showEggToast(`Huevo encontrado (${eggsFound}/${TOTAL_EGGS})`);
+        audio.playEggChime();
         if (eggsFound >= TOTAL_EGGS) {
           endGame(true);
           return;
@@ -575,11 +703,13 @@ function startGame() {
     if (dist < 45 && encounterState === 'lejos') {
       encounterState = 'acecha';
       setBanner('Algo enorme se mueve entre la niebla…', 'aviso');
+      audio.playRoar(0.4);
     }
     if (dist < 16 && encounterState !== 'cerca') {
       encounterState = 'cerca';
       encounterTimer = 0;
       setBanner('¡ES UN T-REX! ¡ALÉJATE!', 'peligro');
+      audio.playRoar(1);
     }
 
     if (encounterState === 'acecha' && dist > 3) {
@@ -640,6 +770,7 @@ function startGame() {
       if (candidate) spawnRaptor(candidate);
     }
 
+    let nearestRaptorDist = Infinity;
     for (const raptor of raptors) {
       if (raptor.state === 'oculto') {
         raptor.cooldown = Math.max(0, raptor.cooldown - delta);
@@ -651,6 +782,7 @@ function startGame() {
 
       if (rdist < RAPTOR_CATCH_DISTANCE && invulnerableTimer <= 0) {
         const lost = registerStrike();
+        audio.playScreech();
         invulnerableTimer = 1.4;
         raptor.state = 'oculto';
         raptor.group.visible = false;
@@ -671,7 +803,19 @@ function startGame() {
       raptor.group.position.x += (rdx / rdist) * chaseSpeed;
       raptor.group.position.z += (rdz / rdist) * chaseSpeed;
       raptor.group.rotation.y = Math.atan2(rdx, rdz);
+      nearestRaptorDist = Math.min(nearestRaptorDist, rdist);
     }
+
+    let trexTension = 0;
+    if (encounterState === 'acecha') trexTension = 0.35;
+    else if (encounterState === 'cerca') trexTension = 0.6 + 0.4 * dangerValue;
+    else if (encounterState === 'retirada') trexTension = 0.3 * dangerValue;
+
+    const raptorTension = nearestRaptorDist === Infinity
+      ? 0
+      : Math.max(0, 1 - nearestRaptorDist / RAPTOR_GIVE_UP_DISTANCE);
+
+    audio.setTension(Math.max(trexTension, raptorTension * 0.85));
 
     renderer.render(scene, camera);
   }
