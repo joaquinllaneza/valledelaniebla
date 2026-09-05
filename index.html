@@ -52,12 +52,26 @@
     color: #ece3cc; font-size: 13px; font-family: -apple-system, sans-serif; touch-action: none;
     display: none;
   }
-  #eggCounter {
-    position: absolute; top: 22px; left: 26px; color: #ece3cc;
-    background: rgba(30,24,16,0.55); padding: 8px 16px; border-radius: 4px;
-    font-size: 15px; font-family: -apple-system, sans-serif; pointer-events: none;
-    display: none;
+  #eggRow {
+    position: absolute; top: 22px; left: 26px;
+    background: rgba(30,24,16,0.55); padding: 8px 12px; border-radius: 4px;
+    display: none; gap: 5px;
   }
+  .egg-icon {
+    width: 13px; height: 17px; border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+    border: 1.5px solid #c9932a; box-sizing: border-box; background: transparent;
+  }
+  .egg-icon.filled { background: #e8dfc0; }
+  #strikeRow {
+    position: absolute; top: 22px; right: 26px;
+    background: rgba(30,24,16,0.55); padding: 8px 12px; border-radius: 4px;
+    display: none; gap: 6px;
+  }
+  .strike-icon {
+    width: 13px; height: 13px; border-radius: 50%;
+    border: 1.5px solid #a83e2c; box-sizing: border-box; background: transparent;
+  }
+  .strike-icon.hit { background: #a83e2c; }
   #eggToast {
     position: absolute; top: 70px; left: 50%; transform: translateX(-50%);
     color: #ece3cc; background: rgba(60,74,44,0.75); border: 1px solid #8a9468;
@@ -90,7 +104,8 @@
       Arrastra el ratón para mirar alrededor.
     </div>
     <button id="walkButton">Caminar</button>
-    <div id="eggCounter">Huevos: 0/10</div>
+    <div id="eggRow"></div>
+    <div id="strikeRow"></div>
     <div id="eggToast"></div>
 
     <div id="endScreen">
@@ -120,7 +135,8 @@ const banner = document.getElementById('banner');
 const vignette = document.getElementById('vignette');
 const walkButton = document.getElementById('walkButton');
 const crosshair = document.getElementById('crosshair');
-const eggCounter = document.getElementById('eggCounter');
+const eggRow = document.getElementById('eggRow');
+const strikeRow = document.getElementById('strikeRow');
 const eggToast = document.getElementById('eggToast');
 const endScreen = document.getElementById('endScreen');
 const endTitle = document.getElementById('endTitle');
@@ -160,7 +176,8 @@ startButton.addEventListener('click', () => {
   hint.style.display = 'block';
   walkButton.style.display = 'block';
   crosshair.style.display = 'block';
-  eggCounter.style.display = 'block';
+  eggRow.style.display = 'flex';
+  strikeRow.style.display = 'flex';
   startGame();
 }, { once: true });
 
@@ -324,6 +341,121 @@ function startGame() {
     eggs.push(egg);
   }, 10, 135);
 
+  eggRow.innerHTML = '';
+  for (let i = 0; i < TOTAL_EGGS; i++) {
+    const icon = document.createElement('div');
+    icon.className = 'egg-icon';
+    eggRow.appendChild(icon);
+  }
+
+  const MAX_STRIKES = 3;
+  let strikes = 0;
+  strikeRow.innerHTML = '';
+  for (let i = 0; i < MAX_STRIKES; i++) {
+    const icon = document.createElement('div');
+    icon.className = 'strike-icon';
+    strikeRow.appendChild(icon);
+  }
+
+  function registerStrike() {
+    strikes += 1;
+    strikeRow.children[strikes - 1].classList.add('hit');
+    vignette.style.transition = 'none';
+    vignette.style.display = 'block';
+    vignette.style.background = 'rgba(168,62,44,0.55)';
+    requestAnimationFrame(() => {
+      vignette.style.transition = 'background 0.6s ease';
+      vignette.style.background = 'rgba(168,62,44,0)';
+    });
+    setTimeout(() => { if (dangerValue <= 0) vignette.style.display = 'none'; }, 650);
+    return strikes >= MAX_STRIKES;
+  }
+
+  function buildRaptor(mainColor, bellyColor) {
+    const mat = new THREE.MeshLambertMaterial({ color: mainColor });
+    const bellyMat = new THREE.MeshLambertMaterial({ color: bellyColor });
+    const raptor = new THREE.Group();
+
+    const rBody = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.0, 2.0), mat);
+    rBody.position.set(0, 1.0, 0);
+    raptor.add(rBody);
+
+    const rBelly = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.65, 1.5), bellyMat);
+    rBelly.position.set(0, 0.85, 0.1);
+    raptor.add(rBelly);
+
+    const rHead = new THREE.Mesh(new THREE.BoxGeometry(0.55, 0.55, 0.95), mat);
+    rHead.position.set(0, 1.55, 1.15);
+    raptor.add(rHead);
+
+    const rJaw = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.2, 0.85), bellyMat);
+    rJaw.position.set(0, 1.32, 1.15);
+    raptor.add(rJaw);
+
+    const rEyeGeo = new THREE.SphereGeometry(0.06, 8, 8);
+    const rEyeMat = new THREE.MeshLambertMaterial({ color: 0xffd23f });
+    [-0.24, 0.24].forEach((sideX) => {
+      const eye = new THREE.Mesh(rEyeGeo, rEyeMat);
+      eye.position.set(sideX, 1.65, 1.55);
+      raptor.add(eye);
+    });
+
+    for (let i = 0; i < 3; i++) {
+      const seg = new THREE.Mesh(
+        new THREE.BoxGeometry(0.5 - i * 0.1, 0.5 - i * 0.1, 0.6),
+        mat
+      );
+      seg.position.set(0, 0.95 - i * 0.08, -1.1 - i * 0.55);
+      raptor.add(seg);
+    }
+
+    const rLegGeo = new THREE.CylinderGeometry(0.15, 0.2, 1.0, 6);
+    [-0.32, 0.32].forEach((sideX) => {
+      const leg = new THREE.Mesh(rLegGeo, mat);
+      leg.position.set(sideX, 0.5, -0.05);
+      raptor.add(leg);
+      const foot = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.15, 0.45), mat);
+      foot.position.set(sideX, 0.07, 0.15);
+      raptor.add(foot);
+    });
+
+    const rArmGeo = new THREE.CylinderGeometry(0.05, 0.07, 0.35, 6);
+    [-0.4, 0.4].forEach((sideX) => {
+      const arm = new THREE.Mesh(rArmGeo, mat);
+      arm.position.set(sideX, 1.2, 0.75);
+      arm.rotation.x = -0.6;
+      raptor.add(arm);
+    });
+
+    return raptor;
+  }
+
+  const MAX_RAPTORS = 3;
+  const RAPTOR_SPEED = 5.8;
+  const RAPTOR_CATCH_DISTANCE = 2.0;
+  const RAPTOR_GIVE_UP_DISTANCE = 52;
+  const raptors = [];
+  for (let i = 0; i < MAX_RAPTORS; i++) {
+    const group = buildRaptor(0x8a4a2e, 0xc98a5e);
+    group.visible = false;
+    scene.add(group);
+    raptors.push({ group, state: 'oculto', cooldown: 0 });
+  }
+  let raptorWaveTimer = 9 + Math.random() * 6;
+  let raptorDesiredCount = 0;
+  let invulnerableTimer = 0;
+
+  function spawnRaptor(raptor) {
+    const angleOffset = (Math.random() - 0.5) * 1.5;
+    const angle = look.yaw + angleOffset;
+    const spawnDist = 38 + Math.random() * 12;
+    const spawnX = camera.position.x - Math.sin(angle) * spawnDist;
+    const spawnZ = camera.position.z - Math.cos(angle) * spawnDist;
+    raptor.group.position.set(spawnX, 0, spawnZ);
+    raptor.group.visible = true;
+    raptor.state = 'activo';
+  }
+
   const keys = {};
   const look = { yaw: Math.PI, pitch: 0 };
   camera.rotation.y = look.yaw;
@@ -334,17 +466,22 @@ function startGame() {
   let gameEnded = false;
   const CATCH_DISTANCE = 3.4;
 
-  function endGame(won) {
+  function endGame(won, reason) {
     gameEnded = true;
     hint.style.display = 'none';
     if (won) {
       endTitle.textContent = '¡Lo habéis conseguido!';
-      endText.textContent = 'Habéis encontrado los 10 huevos de dinosaurio sin que os atrapara.';
+      endText.textContent = 'Habéis encontrado los 10 huevos de dinosaurio sin que os atraparan.';
       endScreen.style.background = 'radial-gradient(circle at 50% 30%, #3f4a2c 0%, #1c2013 70%, #10130a 100%)';
     } else {
       setDanger(0);
-      endTitle.textContent = 'Te ha atrapado el T-Rex';
-      endText.textContent = 'Vuelve a intentarlo: los huevos aparecerán en otros sitios del valle.';
+      if (reason === 'raptors') {
+        endTitle.textContent = 'Los raptores te han atrapado';
+        endText.textContent = 'Te han pillado 3 veces. Vuelve a intentarlo, aparecerán en otros sitios.';
+      } else {
+        endTitle.textContent = 'Te ha atrapado el T-Rex';
+        endText.textContent = 'Vuelve a intentarlo: los huevos aparecerán en otros sitios del valle.';
+      }
       endScreen.style.background = 'radial-gradient(circle at 50% 30%, #5a1e14 0%, #241009 70%, #140805 100%)';
     }
     endScreen.style.display = 'flex';
@@ -417,7 +554,7 @@ function startGame() {
         world.remove(egg);
         eggs.splice(i, 1);
         eggsFound += 1;
-        eggCounter.textContent = `Huevos: ${eggsFound}/${TOTAL_EGGS}`;
+        eggRow.children[eggsFound - 1].classList.add('filled');
         showEggToast(`Huevo encontrado (${eggsFound}/${TOTAL_EGGS})`);
         if (eggsFound >= TOTAL_EGGS) {
           endGame(true);
@@ -431,7 +568,7 @@ function startGame() {
     const dist = Math.hypot(dx, dz);
 
     if (dist < CATCH_DISTANCE) {
-      endGame(false);
+      endGame(false, 'trex');
       return;
     }
 
@@ -487,6 +624,53 @@ function startGame() {
         setBanner(null);
         setDanger(0);
       }
+    }
+
+    invulnerableTimer = Math.max(0, invulnerableTimer - delta);
+
+    raptorWaveTimer -= delta;
+    if (raptorWaveTimer <= 0) {
+      raptorWaveTimer = 10 + Math.random() * 8;
+      raptorDesiredCount = 1 + Math.floor(Math.random() * 3);
+    }
+
+    const activeRaptors = raptors.filter((r) => r.state === 'activo');
+    if (activeRaptors.length < raptorDesiredCount) {
+      const candidate = raptors.find((r) => r.state === 'oculto' && r.cooldown <= 0);
+      if (candidate) spawnRaptor(candidate);
+    }
+
+    for (const raptor of raptors) {
+      if (raptor.state === 'oculto') {
+        raptor.cooldown = Math.max(0, raptor.cooldown - delta);
+        continue;
+      }
+      const rdx = camera.position.x - raptor.group.position.x;
+      const rdz = camera.position.z - raptor.group.position.z;
+      const rdist = Math.hypot(rdx, rdz);
+
+      if (rdist < RAPTOR_CATCH_DISTANCE && invulnerableTimer <= 0) {
+        const lost = registerStrike();
+        invulnerableTimer = 1.4;
+        raptor.state = 'oculto';
+        raptor.group.visible = false;
+        raptor.cooldown = 6 + Math.random() * 6;
+        if (lost) { endGame(false, 'raptors'); return; }
+        continue;
+      }
+
+      if (rdist > RAPTOR_GIVE_UP_DISTANCE) {
+        raptor.state = 'oculto';
+        raptor.group.visible = false;
+        raptor.cooldown = 4 + Math.random() * 7;
+        showEggToast('Un raptor te ha perdido de vista entre la niebla');
+        continue;
+      }
+
+      const chaseSpeed = RAPTOR_SPEED * delta;
+      raptor.group.position.x += (rdx / rdist) * chaseSpeed;
+      raptor.group.position.z += (rdz / rdist) * chaseSpeed;
+      raptor.group.rotation.y = Math.atan2(rdx, rdz);
     }
 
     renderer.render(scene, camera);
