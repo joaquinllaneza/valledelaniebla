@@ -132,7 +132,7 @@
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.module.js';
 
-const GAME_VERSION = '1.4';
+const GAME_VERSION = '1.5';
 document.getElementById('versionLabel').textContent = `Versión ${GAME_VERSION}`;
 
 const mount = document.getElementById('mount');
@@ -188,7 +188,7 @@ function initAudio() {
   master.connect(ctx.destination);
 
   const ambientGain = ctx.createGain();
-  ambientGain.gain.value = 0.03;
+  ambientGain.gain.value = 0.12;
   const ambientFilter = ctx.createBiquadFilter();
   ambientFilter.type = 'lowpass';
   ambientFilter.frequency.value = 300;
@@ -200,7 +200,7 @@ function initAudio() {
     osc.type = 'sine';
     osc.frequency.value = freq;
     const oscGain = ctx.createGain();
-    oscGain.gain.value = 0.33;
+    oscGain.gain.value = 0.45;
     osc.connect(oscGain);
     oscGain.connect(ambientGain);
     osc.start();
@@ -209,7 +209,7 @@ function initAudio() {
   let tension = 0;
   function setTension(target) {
     tension += (target - tension) * 0.04;
-    ambientGain.gain.setTargetAtTime(0.025 + tension * 0.06, ctx.currentTime, 0.3);
+    ambientGain.gain.setTargetAtTime(0.1 + tension * 0.18, ctx.currentTime, 0.3);
     ambientFilter.frequency.setTargetAtTime(280 + tension * 900, ctx.currentTime, 0.3);
   }
 
