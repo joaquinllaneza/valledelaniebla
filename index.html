@@ -52,6 +52,31 @@
     color: #ece3cc; font-size: 13px; font-family: -apple-system, sans-serif; touch-action: none;
     display: none;
   }
+  #eggCounter {
+    position: absolute; top: 22px; left: 26px; color: #ece3cc;
+    background: rgba(30,24,16,0.55); padding: 8px 16px; border-radius: 4px;
+    font-size: 15px; font-family: -apple-system, sans-serif; pointer-events: none;
+    display: none;
+  }
+  #eggToast {
+    position: absolute; top: 70px; left: 50%; transform: translateX(-50%);
+    color: #ece3cc; background: rgba(60,74,44,0.75); border: 1px solid #8a9468;
+    padding: 8px 18px; border-radius: 4px; font-size: 14px;
+    font-family: -apple-system, sans-serif; pointer-events: none; display: none;
+  }
+  #endScreen {
+    position: absolute; inset: 0; display: none; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center; padding: 24px;
+  }
+  #endScreen h1 { color: #ece3cc; font-size: clamp(26px, 4.5vw, 42px); margin: 0; font-weight: 400; }
+  #endScreen p {
+    color: #ece3cc; max-width: 420px; margin-top: 14px; font-size: 16px; line-height: 1.6;
+    font-family: -apple-system, sans-serif; opacity: 0.85;
+  }
+  #endButton {
+    margin-top: 28px; padding: 12px 30px; font-size: 16px; font-family: -apple-system, sans-serif;
+    color: #2c2116; background: #c9932a; border: none; border-radius: 3px; cursor: pointer;
+  }
 </style>
 </head>
 <body>
@@ -65,6 +90,14 @@
       Arrastra el ratón para mirar alrededor.
     </div>
     <button id="walkButton">Caminar</button>
+    <div id="eggCounter">Huevos: 0/10</div>
+    <div id="eggToast"></div>
+
+    <div id="endScreen">
+      <h1 id="endTitle"></h1>
+      <p id="endText"></p>
+      <button id="endButton">Volver a intentarlo</button>
+    </div>
 
     <div id="startScreen">
       <h1>La niebla del valle</h1>
@@ -87,6 +120,22 @@ const banner = document.getElementById('banner');
 const vignette = document.getElementById('vignette');
 const walkButton = document.getElementById('walkButton');
 const crosshair = document.getElementById('crosshair');
+const eggCounter = document.getElementById('eggCounter');
+const eggToast = document.getElementById('eggToast');
+const endScreen = document.getElementById('endScreen');
+const endTitle = document.getElementById('endTitle');
+const endText = document.getElementById('endText');
+const endButton = document.getElementById('endButton');
+
+endButton.addEventListener('click', () => location.reload());
+
+let eggToastTimer = null;
+function showEggToast(text) {
+  eggToast.textContent = text;
+  eggToast.style.display = 'block';
+  clearTimeout(eggToastTimer);
+  eggToastTimer = setTimeout(() => { eggToast.style.display = 'none'; }, 1800);
+}
 
 let walking = false;
 let hintCleared = false;
@@ -111,6 +160,7 @@ startButton.addEventListener('click', () => {
   hint.style.display = 'block';
   walkButton.style.display = 'block';
   crosshair.style.display = 'block';
+  eggCounter.style.display = 'block';
   startGame();
 }, { once: true });
 
@@ -258,6 +308,22 @@ function startGame() {
   rex.rotation.y = Math.PI;
   scene.add(rex);
 
+  const eggGeo = new THREE.SphereGeometry(0.4, 10, 10);
+  eggGeo.scale(1, 1.35, 1);
+  const eggMatA = new THREE.MeshLambertMaterial({ color: 0xe8dfc0 });
+  const eggMatB = new THREE.MeshLambertMaterial({ color: 0xd9c48f });
+  const eggs = [];
+  let eggsFound = 0;
+  const TOTAL_EGGS = 10;
+
+  scatter(TOTAL_EGGS, (x, z) => {
+    const egg = new THREE.Mesh(eggGeo, Math.random() < 0.5 ? eggMatA : eggMatB);
+    egg.position.set(x, 0.5, z);
+    egg.rotation.z = (Math.random() - 0.5) * 0.4;
+    world.add(egg);
+    eggs.push(egg);
+  }, 10, 135);
+
   const keys = {};
   const look = { yaw: Math.PI, pitch: 0 };
   camera.rotation.y = look.yaw;
@@ -265,6 +331,24 @@ function startGame() {
   let encounterState = 'lejos';
   let encounterTimer = 0;
   let dangerValue = 0;
+  let gameEnded = false;
+  const CATCH_DISTANCE = 3.4;
+
+  function endGame(won) {
+    gameEnded = true;
+    hint.style.display = 'none';
+    if (won) {
+      endTitle.textContent = '¡Lo habéis conseguido!';
+      endText.textContent = 'Habéis encontrado los 10 huevos de dinosaurio sin que os atrapara.';
+      endScreen.style.background = 'radial-gradient(circle at 50% 30%, #3f4a2c 0%, #1c2013 70%, #10130a 100%)';
+    } else {
+      setDanger(0);
+      endTitle.textContent = 'Te ha atrapado el T-Rex';
+      endText.textContent = 'Vuelve a intentarlo: los huevos aparecerán en otros sitios del valle.';
+      endScreen.style.background = 'radial-gradient(circle at 50% 30%, #5a1e14 0%, #241009 70%, #140805 100%)';
+    }
+    endScreen.style.display = 'flex';
+  }
 
   window.addEventListener('keydown', (e) => { keys[e.key.toLowerCase()] = true; });
   window.addEventListener('keyup', (e) => { keys[e.key.toLowerCase()] = false; });
@@ -290,6 +374,7 @@ function startGame() {
 
   function animate() {
     requestAnimationFrame(animate);
+    if (gameEnded) { renderer.render(scene, camera); return; }
     const delta = Math.min(clock.getDelta(), 0.05);
 
     camera.rotation.y = look.yaw;
@@ -324,9 +409,31 @@ function startGame() {
     bobPhase += moving ? delta * 9 : 0;
     camera.position.y = eyeHeight + (moving ? Math.sin(bobPhase) * 0.045 : 0);
 
+    for (let i = eggs.length - 1; i >= 0; i--) {
+      const egg = eggs[i];
+      const edx = camera.position.x - egg.position.x;
+      const edz = camera.position.z - egg.position.z;
+      if (Math.hypot(edx, edz) < 2.2) {
+        world.remove(egg);
+        eggs.splice(i, 1);
+        eggsFound += 1;
+        eggCounter.textContent = `Huevos: ${eggsFound}/${TOTAL_EGGS}`;
+        showEggToast(`Huevo encontrado (${eggsFound}/${TOTAL_EGGS})`);
+        if (eggsFound >= TOTAL_EGGS) {
+          endGame(true);
+          return;
+        }
+      }
+    }
+
     const dx = camera.position.x - rex.position.x;
     const dz = camera.position.z - rex.position.z;
     const dist = Math.hypot(dx, dz);
+
+    if (dist < CATCH_DISTANCE) {
+      endGame(false);
+      return;
+    }
 
     if (dist < 45 && encounterState === 'lejos') {
       encounterState = 'acecha';
